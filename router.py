@@ -2,7 +2,7 @@
 
 FAST_MODEL = "llama-3.1-8b-instant"
 MEDIUM_MODEL = "llama-3.3-70b-versatile"
-HIGH_MODEL = "llama-3.3-70b-versatile"
+HIGH_MODEL = "qwen/qwen3-32b"
 
 FAST_INPUT_PRICE = 0.03
 FAST_OUTPUT_PRICE = 0.08
