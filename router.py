@@ -13,56 +13,63 @@ HIGH_OUTPUT_PRICE = 0.99
 
 
 def route_model(prompt):
-    """Classify a prompt into fast/medium/high model tier based on keyword analysis. Returns (model_name, complexity, reason)."""
+    """Route prompts to Fast / Medium / High models using a simple scoring system."""
+
     prompt_lower = prompt.lower()
+    score = 0
+    reasons = []
 
     high_keywords = [
-        "python", "java", "javascript", "typescript", "react", "angular", "vue",
-        "c++", "c#", "golang", "rust", "swift", "kotlin", "ruby", "php",
-        "html", "css", "sql", "nosql", "mongodb", "postgresql", "mysql",
-        "docker", "kubernetes", "aws", "azure", "gcp", "terraform",
-        "debug", "debugging", "compiler", "stack trace", "error",
-        "algorithm", "data structure", "architecture", "design pattern",
-        "refactor", "refactoring", "optimize", "optimization",
-        "code review", "pull request", "ci/cd", "pipeline",
-        "api", "rest", "graphql", "microservice", "microservices",
-        "multithreading", "concurrency", "parallelism",
-        "oop", "solid", "dependency injection",
-        "machine learning", "deep learning", "neural network",
-        "blockchain", "smart contract", "solidity",
-        "devops", "sre", "observability", "monitoring",
-        "testing", "unit test", "integration test", "e2e",
-        "security", "authentication", "authorization", "oauth",
-        "performance", "scalability", "load balancing",
-        "code", "programming", "software engineering", "system design",
+        "system design", "distributed system", "microservices",
+        "kubernetes", "docker", "kafka", "redis", "sharding",
+        "load balancer", "cap theorem", "raft", "paxos",
+        "event sourcing", "cqrs", "vector database",
+        "rag", "llm", "transformer", "gpu",
+        "compiler", "kernel", "operating system internals",
     ]
 
     medium_keywords = [
-        "career", "resume", "interview", "job", "salary",
-        "roadmap", "learning path", "certification",
-        "skill", "portfolio", "linkedin", "github",
-        "recommend", "suggest", "advice", "guide",
-        "project", "assignment", "homework",
-        "explain", "describe", "what is", "how to",
-        "compare", "difference between", "pros and cons",
+        "python", "java", "javascript", "typescript",
+        "react", "angular", "vue",
+        "c++", "c#", "golang", "rust",
+        "html", "css",
+        "sql", "mongodb", "postgresql", "mysql",
+        "oop", "solid",
+        "algorithm", "data structure",
+        "api", "rest", "graphql",
+        "debug", "testing",
+        "resume", "interview", "career",
+        "project", "roadmap",
+        "explain", "compare", "difference",
     ]
 
     for kw in high_keywords:
         if kw in prompt_lower:
-            return HIGH_MODEL, "high", f"Prompt contains technical keyword: '{kw}'"
+            score += 4
+            reasons.append(kw)
 
     for kw in medium_keywords:
         if kw in prompt_lower:
-            return MEDIUM_MODEL, "medium", f"Prompt contains career/educational keyword: '{kw}'"
+            score += 2
+            reasons.append(kw)
 
-    if len(prompt) > 200:
-        return MEDIUM_MODEL, "medium", "Long prompt (>200 chars) requires moderate capability"
+    # Prompt length contributes to complexity
+    if len(prompt) > 800:
+        score += 6
+    elif len(prompt) > 400:
+        score += 4
+    elif len(prompt) > 200:
+        score += 2
 
-    if len(prompt) < 30:
-        return FAST_MODEL, "low", "Short/simple prompt (<30 chars)"
+    # Route based on total score
+    if score >= 10:
+        return HIGH_MODEL, "high", f"Score={score} ({', '.join(reasons[:3])})"
 
-    return FAST_MODEL, "low", "General query routed to fast model"
+    elif score >= 4:
+        return MEDIUM_MODEL, "medium", f"Score={score} ({', '.join(reasons[:3])})"
 
+    else:
+        return FAST_MODEL, "low", f"Score={score}"
 
 def estimate_cost(model, prompt_tokens, completion_tokens):
     """Estimate the API cost in USD for a given model and token counts."""
