@@ -17,4 +17,4 @@ AI-powered Placement Assistant built using:
 - Persistent Memory
 - Intelligent Model Routing
 
-Built for the Hindsight × Cascadeflow Hackathon.
+Built for the Hindsight × Cascadeflow 
