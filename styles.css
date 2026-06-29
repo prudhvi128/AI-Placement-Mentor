@@ -782,17 +782,80 @@ header[data-testid="stHeader"] [data-testid="stMainMenu"] { display: none !impor
   padding-left: 38px;
 }
 
-/* ===== MESSAGE METADATA ===== */
-.msg-meta {
-  font-size: 13px !important;
-  font-weight: 500 !important;
-  color: var(--text-muted) !important;
-  padding: 0 0 6px 12px !important;
-  line-height: 1.4 !important;
-  white-space: nowrap !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
+/* ===== RUNTIME CARD (metadata) ===== */
+.runtime-card {
+  background: rgba(34, 34, 53, 0.85);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  padding: 5px 12px;
+  margin: 0 0 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--font-sans);
+  line-height: 1.4;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.15);
 }
+
+[data-theme="light"] .runtime-card {
+  background: rgba(255, 255, 255, 0.78);
+  border-color: rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+}
+
+.rt-pri {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 14px;
+}
+
+.rt-sec {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 14px;
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+.rt-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.rt-icon {
+  font-size: 11px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.rt-lbl {
+  color: var(--text-muted);
+  margin-right: 1px;
+}
+
+.rt-val {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* Icon accent colors */
+.rt-exec .rt-icon { color: #3b82f6; }
+.rt-provider .rt-icon { color: #38bdf8; }
+.rt-model .rt-icon { color: #6366f1; }
+.rt-latency .rt-icon { color: #f59e0b; }
+.rt-cost .rt-icon { color: #22c55e; }
+.rt-route .rt-icon { color: var(--text-secondary); }
+.rt-reason .rt-icon { color: var(--text-muted); }
 
 /* ===== TIMESTAMPS ===== */
 .message .msg-time {
@@ -1696,12 +1759,14 @@ textarea:focus, .stTextArea textarea:focus {
     border-radius: 18px 18px 18px 4px !important;
   }
 
-  /* Mobile metadata: allow wrapping */
-  .msg-meta {
-    white-space: normal !important;
-    word-break: break-all !important;
-    padding-bottom: 4px !important;
+  /* Mobile runtime card: tighter padding, allow wrap */
+  .runtime-card {
+    padding: 4px 10px !important;
+    margin: 0 0 4px 8px !important;
   }
+  .rt-pri { gap: 1px 10px !important; }
+  .rt-sec { gap: 1px 10px !important; font-size: 10.5px !important; }
+  .rt-item { white-space: normal !important; }
 
   /* Footer text */
   .block-container > p {
@@ -1737,3 +1802,4 @@ textarea:focus, .stTextArea textarea:focus {
     max-width: 85% !important;
   }
 }
+

@@ -1,0 +1,30 @@
+John Doe
+Full Stack Developer | john.doe@email.com | (555) 123-4567
+
+SUMMARY
+Experienced Full Stack Developer with 5 years of expertise in Python, JavaScript, React, and Node.js. Passionate about building scalable web applications and mentoring junior developers.
+
+SKILLS
+- Languages: Python, JavaScript, TypeScript, SQL
+- Frameworks: React, Node.js, Django, Flask
+- Cloud: AWS, Docker, Kubernetes
+- Tools: Git, CI/CD, PostgreSQL, Redis
+
+EXPERIENCE
+
+Senior Full Stack Developer
+Tech Corp Inc. | Jan 2022 - Present
+- Led development of microservices architecture serving 1M+ users
+- Implemented CI/CD pipeline reducing deployment time by 70%
+- Mentored 5 junior developers through code reviews and pair programming
+
+Full Stack Developer
+StartUp Labs | Mar 2020 - Dec 2021
+- Built React-based dashboard with real-time data visualization
+- Designed RESTful APIs with Node.js and Express
+- Migrated legacy monolith to microservices
+
+EDUCATION
+
+B.S. Computer Science
+State University | 2016 - 2020

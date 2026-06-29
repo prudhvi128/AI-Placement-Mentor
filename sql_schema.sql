@@ -41,8 +41,12 @@ create table if not exists public.messages (
     role            text not null check (role in ('user', 'assistant', 'system')),
     content         text not null,
     timestamp       text not null default '',        -- formatted by Python: "Jun 28, 02:30 PM"
+    metadata        jsonb not null default '{}'::jsonb,
     created_at      timestamptz not null default now()
 );
+
+alter table public.messages
+    add column if not exists metadata jsonb not null default '{}'::jsonb;
 
 -- 1d. user_settings — per-user preferences
 create table if not exists public.user_settings (

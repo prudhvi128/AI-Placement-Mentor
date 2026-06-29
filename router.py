@@ -24,7 +24,7 @@ def route_model(prompt):
         "kubernetes", "docker", "kafka", "redis", "sharding",
         "load balancer", "cap theorem", "raft", "paxos",
         "event sourcing", "cqrs", "vector database",
-        "rag", "llm", "transformer", "gpu",
+        "rag", "llm", "transformer", "gpu","system architecture", "cloud architecture", "devops", "ci/cd",
         "compiler", "kernel", "operating system internals",
     ]
 
@@ -62,10 +62,10 @@ def route_model(prompt):
         score += 2
 
     # Route based on total score
-    if score >= 10:
+    if score >= 6:
         return HIGH_MODEL, "high", f"Score={score} ({', '.join(reasons[:3])})"
 
-    elif score >= 4:
+    elif score >= 3:
         return MEDIUM_MODEL, "medium", f"Score={score} ({', '.join(reasons[:3])})"
 
     else:

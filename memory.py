@@ -70,6 +70,42 @@ def save_interview_report(user_id: str, report: str) -> bool:
 
 
 # -----------------------------
+# Personal Info Extraction
+# -----------------------------
+
+def extract_and_save_user_info(user_id: str, text: str) -> None:
+    """Extract personal information (name, location, job, etc.) from user text
+    and save to persistent memory. Uses regex patterns to detect self-introductions.
+    """
+    import re
+    patterns = {
+        "user_name": [
+            r"(?:my name is|my name's)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+            r"call me\s+([A-Z][a-z]+)",
+        ],
+        "user_location": [
+            r"(?:i live in|i'm from|i am from|based in)\s+([A-Za-z\s]+?)(?:,|\.|!|\?|$)",
+        ],
+        "user_job_role": [
+            r"(?:i work as|i'm a|i am a)\s+(?:an?\s+)?([A-Za-z\s]+?)\s+(?:at|for|in|with|and|\.|,|!|\?)",
+        ],
+        "user_company": [
+            r"(?:i work at|i work for)\s+([A-Za-z0-9\s]+?)(?:,|\.|!|\?|$)",
+        ],
+    }
+
+    for key, regexes in patterns.items():
+        for pattern in regexes:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                value = m.group(1).strip().rstrip(".,!?")
+                if len(value) > 2 and len(value) < 100:
+                    database.upsert_user_memory(user_id, key, value)
+                    print(f"[MEMORY] Saved {key} = {value}")
+                    break
+
+
+# -----------------------------
 # Interview Context Builder (unchanged — reads from Supabase tables directly)
 # -----------------------------
 

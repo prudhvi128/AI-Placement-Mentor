@@ -1,4 +1,59 @@
-venv/
-.env
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.*
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Pytest
+.pytest_cache/
+.pytest_cache/**
+.coverage
+htmlcov/
+
+# Test reports
+reports/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local databases
+*.db
+*.sqlite3
+
+# Browser Use (if not using)
+default/
+
+# Playwright
+playwright-report/
+test-results/
+
+# Misc
+.cache/

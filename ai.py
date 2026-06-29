@@ -1,11 +1,35 @@
-"""AI provider layer — Groq API calls, warmup, response sanitization, model routing."""
 
-import requests
-import streamlit as st
+"""AI provider layer â€” CascadeFlow routing with Groq backend, warmup, response sanitization."""
+
 import time
+import asyncio
+import streamlit as st
+import requests
 from dotenv import load_dotenv
+from cascadeflow import (
+    CascadeAgent,
+    ModelConfig,
+)
 
 load_dotenv()
+
+_CASCADE_LOOP = None
+
+# Reusable ModelConfigs keyed by model name (used by update_models).
+_MODEL_CONFIGS = {
+    "llama-3.1-8b-instant": ModelConfig(
+        name="llama-3.1-8b-instant", provider="groq",
+        cost=0.00003, cost_output=0.00008,
+    ),
+    "llama-3.3-70b-versatile": ModelConfig(
+        name="llama-3.3-70b-versatile", provider="groq",
+        cost=0.00059, cost_output=0.00079,
+    ),
+    "qwen/qwen3-32b": ModelConfig(
+        name="qwen/qwen3-32b", provider="groq",
+        cost=0.00079, cost_output=0.00099,
+    ),
+}
 
 
 def warmup_ai() -> bool:
@@ -92,6 +116,93 @@ def is_ready() -> bool:
 def get_warmup_error() -> str:
     return st.session_state.get("_ai_error", "")
 
+
+# =============================================================================
+# CASCADEFLOW INITIALIZATION
+# =============================================================================
+
+def _init_cascade_agent():
+    """Initialize CascadeFlow agent with Groq models for routing only.
+
+    Cascade is DISABLED — only one model is used per request (no draft/verifier).
+    CascadeFlow is used solely for complexity detection and to provide
+    the metadata format consumed by the UI metadata bar.
+    Model selection is handled by router.route_model().
+    """
+    if "_cascade_agent" in st.session_state:
+        return st.session_state._cascade_agent
+
+    from config import GROQ_API_KEY
+
+    # Define models in cost order (cheapest to most expensive)
+    models = [
+        ModelConfig(
+            name="llama-3.1-8b-instant",
+            provider="groq",
+            cost=0.00003,
+            cost_output=0.00008,
+        ),
+        ModelConfig(
+            name="llama-3.3-70b-versatile",
+            provider="groq",
+            cost=0.00059,
+            cost_output=0.00079,
+        ),
+        ModelConfig(
+            name="qwen/qwen3-32b",
+            provider="groq",
+            cost=0.00079,
+            cost_output=0.00099,
+        ),
+    ]
+
+    # Cascade disabled — the agent is only used for complexity detection
+    # and its PreRouter always returns DIRECT_BEST (single model).
+    agent = CascadeAgent(
+        models=models,
+        enable_cascade=False,
+        verbose=False,
+    )
+
+    st.session_state._cascade_agent = agent
+    print("[AI] CascadeFlow agent initialized (cascade disabled — routing only)")
+    return agent
+
+
+def _get_cascade_loop():
+    """Return a Streamlit-safe asyncio event loop for CascadeFlow execution."""
+    global _CASCADE_LOOP
+    loop = _CASCADE_LOOP
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        _CASCADE_LOOP = loop
+        st.session_state.pop("_cascade_agent", None)
+    asyncio.set_event_loop(loop)
+    return loop
+
+
+def _run_cascade(agent, **kwargs):
+    """Run CascadeAgent.run() inside a persistent event loop (Streamlit-safe)."""
+    loop = _get_cascade_loop()
+    if loop.is_running():
+        raise RuntimeError("CascadeFlow event loop is already running")
+    return loop.run_until_complete(agent.run(**kwargs))
+
+
+def _current_prompt_complexity_hint(agent, prompt: str) -> str | None:
+    """Use CascadeFlow's detector on the latest user turn, not the whole system prompt."""
+    try:
+        detected = agent.complexity_detector.detect(prompt)
+        complexity = detected[0]
+        return getattr(complexity, "value", str(complexity))
+    except Exception:
+        return None
+
+
+# =============================================================================
+# MEMORY CONTEXT BUILDER
+# =============================================================================
+
 from memory import (
     search_memory,
     save_career_goal,
@@ -101,8 +212,8 @@ from memory import (
     save_missing_skills,
     save_interview_report,
     build_interview_memory_context,
+    extract_and_save_user_info,
 )
-from router import route_model, estimate_cost
 from config import GROQ_API_KEY
 import database
 
@@ -113,27 +224,45 @@ def _strip_reasoning(text: str) -> str:
     """
     import re
 
-    # ── 1. XML/HTML reasoning blocks ──
-    text = re.sub(
-        r'<(?:thinking|thought|reasoning|analysis|plan)[^>]*>.*?</(?:thinking|thought|reasoning|analysis|plan)>',
-        '', text, flags=re.DOTALL | re.IGNORECASE
-    )
+    # â”€â”€ 1. XML/HTML reasoning blocks â”€â”€
+    # Match common reasoning tags: <think>, <reasoning>, <thinking>, etc.
+    # Process line by line to handle unclosed tags
+    lines = text.split('\n')
+    cleaned_lines = []
+    skip_until_closing = False
 
-    # ── 2. BBcode reasoning blocks ──
+    for line in lines:
+        line_stripped = line.strip()
+        # Check if line starts with a reasoning tag
+        if re.match(r'<(think|thinking|thought|reasoning|analysis|plan)>', line_stripped, re.IGNORECASE):
+            skip_until_closing = True
+            continue
+        # Check if line has a closing tag
+        if re.search(r'</(think|thinking|thought|reasoning|analysis|plan)>', line_stripped, re.IGNORECASE):
+            skip_until_closing = False
+            continue
+        # Skip lines if we're inside a reasoning block
+        if skip_until_closing:
+            continue
+        cleaned_lines.append(line)
+
+    text = '\n'.join(cleaned_lines)
+
+    # â”€â”€ 2. BBcode reasoning blocks â”€â”€
     text = re.sub(
         r'\[(?:thinking|thought|reasoning|analysis|plan)\].*?\[/(?:thinking|thought|reasoning|analysis|plan)\]',
         '', text, flags=re.DOTALL | re.IGNORECASE
     )
 
-    # ── 3. Fenced reasoning blocks (```thinking ... ```) ──
+    # â”€â”€ 3. Fenced reasoning blocks (```thinking ... ```) â”€â”€
     text = re.sub(
         r'```(?:thinking|thought|reasoning|analysis|plan)\s*\n.*?```',
         '', text, flags=re.DOTALL | re.IGNORECASE
     )
 
-    # ── 4. Markdown-formatted reasoning markers through blank line ──
+    # â”€â”€ 4. Markdown-formatted reasoning markers through blank line â”€â”€
     # Strip **Thinking:** / **Thought:** / **Reasoning:** / **Analysis:** markers.
-    # For headings (##), only strip thinking/thought/reasoning — NOT "analysis"
+    # For headings (##), only strip thinking/thought/reasoning â€” NOT "analysis"
     # (which is often a legitimate answer section header).
     text = re.sub(
         r'(?:\*{1,2}(?:thinking|thought|reasoning|analysis)\*{0,2}:|'
@@ -141,7 +270,7 @@ def _strip_reasoning(text: str) -> str:
         '', text, flags=re.DOTALL | re.IGNORECASE
     )
 
-    # ── 5. Preamble reasoning sentences at start of text ──
+    # â”€â”€ 5. Preamble reasoning sentences at start of text â”€â”€
     # Each pattern matches a SINGLE sentence that begins with self-talk / planning.
     # Uses [^.!?\n]*[.!?\n]? to match exactly one sentence (not everything to end-of-line),
     # so answer content on the same line survives.
@@ -151,7 +280,7 @@ def _strip_reasoning(text: str) -> str:
         rf'^let me (?:think|reason|analyze|consider|check|verify|review|examine|assess|evaluate|determine|figure|plan|prepare|look|see|explain|elaborate|start|begin)\b{_S}',
         # "I need to check/verify/look..."
         rf'^i need to (?:check|verify|look|analyze|consider|understand|review|examine|assess|evaluate|determine|figure|think|reason|plan)\b{_S}',
-        # "I should/will/must/can/want (also/just) [any verb]..." — catch ALL self-talk verbs
+        # "I should/will/must/can/want (also/just) [any verb]..." â€” catch ALL self-talk verbs
         rf"^i (?:should|'?ll|need to|want to|have to|must|can)\s+(?:also|then|now|first|just)?\s*\w+{_S}",
         # "I think/believe/feel/suppose/assume/guess/wonder..."
         rf'^i (?:think|believe|feel|suppose|assume|guess|wonder|imagine)\b{_S}',
@@ -192,9 +321,9 @@ def _strip_reasoning(text: str) -> str:
         if not matched:
             break
 
-    # ── 6. Strip memory-update / system announcements (silent memory) ──
+    # â”€â”€ 6. Strip memory-update / system announcements (silent memory) â”€â”€
     text = re.sub(
-        r'(?im)^(?:✅\s*)?'
+        r'(?im)^(?:âœ…\s*)?'
         r'(?:'
         r'no\s+(?:information|data|context|memory|entries)(?:\s+\w+){0,5}\s+(?:exists|found|available|stored)|'
         r'nothing\s+(?:in|found|stored)\s+(?:memory|context)|'
@@ -208,7 +337,13 @@ def _strip_reasoning(text: str) -> str:
         '', text
     )
 
-    # ── 7. Remove leftover double spacing ──
+    # â”€â”€ 7. Remove leftover double spacing â”€â”€
+    # Strip leading markdown headings from response start
+    text = re.sub(
+        r'^(?:#{1,6}\s+.*?(?:\n|$)(?:---+\n)?)+',
+        '', text
+    )
+
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
@@ -274,19 +409,26 @@ def _build_user_context(user_id: str) -> str:
     return "\n\n".join(parts)
 
 
-def ask_ai(prompt, user_id: str = ""):
-    """Send a chat prompt to Groq with memory context and model routing; return (answer, info_dict)."""
-    url = "https://api.groq.com/openai/v1/chat/completions"
+# =============================================================================
+# MAIN AI FUNCTIONS
+# =============================================================================
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
+def ask_ai(prompt, user_id: str = ""):
+    """Send a chat prompt via CascadeFlow with single-model routing; return (answer, info_dict).
+
+    CascadeFlow receives every request and executes it with exactly ONE model
+    (no draft/verifier).  Model selection is done by router.route_model() and
+    the agent's model list is narrowed to the selected model before each call.
+
+    Returns:
+        tuple: (answer_text, metadata_dict)
+        metadata_dict contains all CascadeResult fields consumed by the UI.
+    """
+    from router import route_model
+
+    agent = _init_cascade_agent()
+
     memory_context = _build_user_context(user_id) if user_id else ""
-    print("========== USER CONTEXT ==========")
-    print(memory_context)
-    print("============================")
-    model, complexity, routing_reason = route_model(prompt)
 
     system_prompt = f"""
 You are an AI Placement Mentor.
@@ -303,14 +445,14 @@ The section below labeled === USER CONTEXT === contains stored information about
 RULES:
 1. Use stored context SILENTLY to improve and personalize your answers.
 2. For greetings, casual conversation, or simple questions, IGNORE stored context entirely. Do not reference past interviews, weaknesses, or profile data unless the user explicitly asks.
-3. Only reference stored information when the user\'s current question is directly about that topic (e.g., asks about interview prep, weaknesses, career path, skills, or roadmap).
+3. Only reference stored information when the user's current question is directly about that topic (e.g., asks about their name, personal info, interview prep, weaknesses, career path, skills, or roadmap).
 4. Never list, summarize, or announce what you remember from past interactions.
-5. Answer the user\'s CURRENT message first. Do not lead with a recap of their history.
+5. Answer the user's CURRENT message first. Do not lead with a recap of their history.
 6. Never use phrases like "based on your profile", "according to your memory", "your past interviews show", or "I remember you...". Incorporate relevant context naturally as if it is your own knowledge.
 7. If no part of the stored context is relevant to the current question, proceed normally as if you have no stored information.
 
 Format your response in Markdown.
-Use headings and bullet points when helpful.
+Do not use headings (##, ###, etc.) — respond directly with plain text or bullet points.
 Wrap code inside triple backticks.
 Explain code after it.
 Mention time and space complexity for coding questions."""
@@ -340,46 +482,87 @@ Use this resume whenever the user asks about:
 
 {memory_context}"""
 
-    data = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": system_prompt + context_section
-            }
-        ] + sanitize_messages_for_groq(st.session_state.messages)
-    }
+    messages = [
+        {
+            "role": "system",
+            "content": system_prompt + context_section
+        }
+    ] + sanitize_messages_for_groq(st.session_state.messages)
 
     start = time.time()
-    for attempt in range(2):
-        try:
-            response = requests.post(url, headers=headers, json=data)
-            elapsed_ms = (time.time() - start) * 1000
-            result = response.json()
-            if "choices" not in result:
-                raise Exception(f"Groq API error: {result}")
-            st.session_state.ai_ready = True
-            answer = _strip_reasoning(result["choices"][0]["message"]["content"])
-            usage = result.get("usage", {})
-            prompt_tokens = usage.get("prompt_tokens", 0)
-            completion_tokens = usage.get("completion_tokens", 0)
-            cost = estimate_cost(model, prompt_tokens, completion_tokens)
-            break
-        except Exception as e:
-            if attempt == 0:
-                time.sleep(0.5)
-                continue
-            return (
-                f"⚠️ **AI request failed:** `{type(e).__name__}: {e}`",
-                {"model": "unknown", "latency": 0, "cost": 0, "complexity": "unknown", "routing": "unknown"},
-            )
+    try:
+        complexity = _current_prompt_complexity_hint(agent, prompt) or "simple"
+
+        selected_model, tier, route_reason = route_model(prompt)
+
+        model_cfg = _MODEL_CONFIGS.get(selected_model)
+        if model_cfg is None:
+            raise ValueError(f"Unknown model: {selected_model}")
+        agent.update_models([model_cfg])
+
+        result = _run_cascade(
+            agent,
+            query=prompt,
+            messages=messages,
+            max_tokens=4096,
+            temperature=0.7,
+        )
+
+        answer = _strip_reasoning(result.content)
+
+        metadata = {
+            "model": result.model_used,
+            "latency": result.latency_ms,
+            "cost": result.total_cost,
+            "complexity": result.complexity,
+            "routing_strategy": result.routing_strategy,
+            "cascaded": result.cascaded,
+            "draft_accepted": result.draft_accepted,
+            "reason": f"routed to {tier}: {route_reason}",
+            "quality_score": result.quality_score,
+            "quality_threshold": result.quality_threshold,
+            "quality_check_passed": result.quality_check_passed,
+            "rejection_reason": result.rejection_reason,
+            "draft_model": result.draft_model,
+            "draft_latency_ms": result.draft_latency_ms,
+            "draft_confidence": result.draft_confidence,
+            "verifier_model": result.verifier_model,
+            "verifier_latency_ms": result.verifier_latency_ms,
+            "verifier_confidence": result.verifier_confidence,
+            "draft_cost": result.draft_cost,
+            "verifier_cost": result.verifier_cost,
+            "cost_saved": result.cost_saved,
+            "complexity_detection_ms": result.complexity_detection_ms,
+            "draft_generation_ms": result.draft_generation_ms,
+            "quality_verification_ms": result.quality_verification_ms,
+            "verifier_generation_ms": result.verifier_generation_ms,
+            "cascade_overhead_ms": result.cascade_overhead_ms,
+            "metadata": result.metadata,
+            "provider": "Groq",
+        }
+
+        st.session_state.ai_ready = True
+
+    except Exception as e:
+        return (
+            f"âš ï¸ **AI request failed:** `{type(e).__name__}: {e}`",
+            {
+                "model": "unknown",
+                "latency": 0,
+                "cost": 0,
+                "complexity": "unknown",
+                "routing_strategy": "unknown",
+                "cascaded": False,
+                "reason": str(e),
+            },
+        )
 
     career_words = [
     "want to become",
     "my goal is",
     "career goal",
     "dream job"
-]
+    ]
 
     if user_id and any(word in prompt.lower() for word in career_words):
         save_career_goal(user_id, prompt)
@@ -388,22 +571,20 @@ Use this resume whenever the user asks about:
     "finished",
     "learned",
     "studied"
-]
+    ]
 
     if user_id and any(word in prompt.lower() for word in learning_words):
         save_learning_progress(user_id, prompt)
-    return (
-    answer,
-    {
-        "model": model,
-        "latency": elapsed_ms,
-        "cost": cost,
-        "complexity": complexity,
-        "routing": routing_reason,
-    }
-)
+
+    # Extract personal info (name, location, job, etc.) from user's message
+    if user_id:
+        extract_and_save_user_info(user_id, prompt)
+
+    return (answer, metadata)
+
+
 def analyze_resume(resume_text, user_id: str = ""):
-    """Analyze a resume via Groq — ATS score, strengths/weaknesses, missing skills, suggested projects, interview questions, learning roadmap."""
+    """Analyze a resume via Groq â€” ATS score, strengths/weaknesses, missing skills, suggested projects, interview questions, learning roadmap."""
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     headers = {
